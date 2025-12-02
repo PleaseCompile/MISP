@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <title>MISP Data Flow Visual Guide (DB vs API)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+  </script>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: "Inter", "Noto Sans Thai", system-ui, -apple-system, sans-serif; line-height: 1.6; margin: 0 auto; max-width: 1100px; padding: 32px 24px; }
+    h1, h2, h3 { margin-top: 28px; }
+    .card { border: 1px solid #ccc; border-radius: 12px; padding: 18px 20px; margin: 22px 0; background: rgba(255,255,255,0.8); }
+    .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+    code { background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 6px; }
+    details { border: 1px solid #ddd; border-radius: 10px; padding: 14px 16px; margin: 16px 0; background: rgba(0,0,0,0.03); }
+    details summary { cursor: pointer; font-weight: 600; }
+    .note { color: #b34700; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>คู่มือภาพรวมการไหลข้อมูล MISP: เข้าถึง DB ตรง vs เขียนโปรแกรมผ่าน API</h1>
+    <p>
+      หน้านี้ช่วยให้เห็นภาพฐานข้อมูล MISP และเส้นทางการใช้งาน 2 กรณีหลัก:
+      <strong>การแก้/เพิ่มข้อมูลตรงในฐานข้อมูล</strong> และ <strong>การดึง/ส่งข้อมูลผ่านโปรแกรม (API)</strong> โดยอ้างอิงจาก ER Diagram หลักในโครงการเดิม
+      และเพิ่มแผนภาพลำดับการ Query/Flow ให้ลองนำไปปรับใช้หรือทดลองลบ-ดึงข้อมูลได้อย่างเข้าใจโครงสร้าง
+    </p>
+  </header>
+
+  <section class="card">
+    <h2>1) ภาพรวมโครงสร้าง (ER Snapshot)</h2>
+    <p>แผนภาพย่อด้านล่างเน้นตารางหลักที่ต้องแตะบ่อยเมื่อเพิ่ม/อ่านข้อมูลทั้งสองกรณี</p>
+    <div class="mermaid">
+      erDiagram
+        ORGANISATIONS ||--o{ USERS : owns
+        USERS ||--o{ EVENTS : creates
+        EVENTS ||--o{ ATTRIBUTES : contains
+        EVENTS ||--o{ MISP_OBJECTS : groups
+        MISP_OBJECTS ||--o{ ATTRIBUTES : composed_of
+        ATTRIBUTES ||--o{ SIGHTINGS : observed_in
+        EVENTS ||--o{ EVENT_REPORTS : documents
+        TAGS ||--o{ EVENT_TAGS : labels
+        TAGS ||--o{ ATTRIBUTE_TAGS : labels
+        EVENTS ||--o{ EVENT_TAGS : tagged_with
+        ATTRIBUTES ||--o{ ATTRIBUTE_TAGS : tagged_with
+        SHARING_GROUPS ||--o{ EVENTS : scope
+        SHARING_GROUPS ||--o{ SHARING_GROUP_ORG : members
+        ORGANISATIONS ||--o{ SHARING_GROUP_ORG : participates
+    </div>
+    <p class="note">โฟกัสกุญแจเชื่อมโยง: <code>event_id</code>, <code>object_id</code>, <code>attribute_id</code>, <code>org_id</code>, <code>sharing_group_id</code></p>
+  </section>
+
+  <section>
+    <h2>2) กรณีเพิ่ม/แก้ข้อมูลตรงในฐานข้อมูล</h2>
+    <div class="two-col">
+      <div class="card">
+        <h3>ลำดับการเพิ่มข้อมูลหลัก</h3>
+        <ol>
+          <li>สร้างองค์กร/ผู้ใช้: เพิ่มแถวใน <code>organisations</code>, <code>users</code> (ตั้ง <code>organisation_id</code>, <code>role_id</code>)</li>
+          <li>สร้างเหตุการณ์: insert เข้า <code>events</code> กำหนด <code>uuid</code>, <code>distribution</code>, <code>sharing_group_id</code> (ถ้าใช้)</li>
+          <li>เพิ่ม Attribute: insert เข้า <code>attributes</code> โดยตั้ง <code>event_id</code> และ <code>object_id</code> ถ้ามาจาก Object</li>
+          <li>เพิ่ม Object (ถ้าต้องการโครงสร้าง): insert เข้า <code>misp_objects</code> ระบุ <code>template_uuid</code> แล้วเพิ่ม Attribute ย่อย + <code>object_references</code> เชื่อมกัน</li>
+          <li>ติดแท็ก/บริบท: ใส่ข้อมูลใน <code>tags</code> แล้วสร้างรายการเชื่อม เช่น <code>event_tags</code>, <code>attribute_tags</code></li>
+          <li>กำหนดการแชร์: ปรับค่า <code>distribution</code> หรือผูก <code>sharing_group_id</code>; ใช้ <code>sharing_group_org</code> เพื่อเพิ่มสมาชิก</li>
+        </ol>
+      </div>
+      <div class="card">
+        <h3>Query ที่แตะบ่อย (ตัวอย่าง)</h3>
+        <ul>
+          <li><strong>ดึงเหตุการณ์พร้อมแท็ก</strong>: join <code>events</code> ⇄ <code>event_tags</code> ⇄ <code>tags</code></li>
+          <li><strong>ดึง Attribute ทั้งหมดในเหตุการณ์</strong>: select จาก <code>attributes</code> ด้วย <code>event_id = ?</code></li>
+          <li><strong>ดู Object และความสัมพันธ์</strong>: join <code>misp_objects</code> ⇄ <code>object_references</code> ⇄ <code>attributes</code></li>
+          <li><strong>ตรวจขอบเขตการแชร์</strong>: อ่าน <code>events.distribution</code> และ <code>sharing_group_id</code>; ถ้ากลุ่ม แชร์ ให้ join <code>sharing_group_org</code></li>
+          <li><strong>ลบแบบปลอดภัย</strong>: พิจารณา soft-delete โดยตั้ง flag (เช่น <code>attributes.deleted = 1</code>) ก่อน hard-delete</li>
+        </ul>
+      </div>
+    </div>
+
+    <details open>
+      <summary>Visualization: เส้นทาง Insert/Update ใน DB</summary>
+      <div class="mermaid">
+        flowchart TD
+          subgraph Setup[เตรียมความพร้อม]
+            A1[ORG/USER พร้อมสิทธิ์] --> A2[เลือก sharing_group]
+          end
+          subgraph EventFlow[เพิ่มเหตุการณ์]
+            E1[INSERT events] --> E2[INSERT misp_objects]
+            E1 --> E3[INSERT attributes]
+            E2 --> E4[INSERT object_references]
+            E2 --> E5[INSERT attributes (object members)]
+            E3 --> E6[INSERT sightings (ถ้ามี)]
+          end
+          subgraph Context[บริบท]
+            T1[INSERT tags] --> T2[INSERT event_tags]
+            T1 --> T3[INSERT attribute_tags]
+          end
+          A2 --> E1
+          E1 --> T2
+          E3 --> T3
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>3) กรณีเขียนโปรแกรมดึง/ส่งผ่าน API (แอปหรือสคริปต์)</h2>
+    <p>เส้นทางนี้ใช้ REST API ของ MISP (เช่น <code>/events</code>, <code>/attributes</code>, <code>/sightings</code>) หรือ Python/PHP clients ที่เรียก API เดียวกัน</p>
+    <div class="card">
+      <h3>แนวทางใช้งานทั่วไป</h3>
+      <ul>
+        <li><strong>สร้าง/อัปเดตเหตุการณ์:</strong> POST/PUT ไปที่ <code>/events</code>, กำหนด <code>distribution</code>, <code>sharing_group_id</code> เหมือนใน DB</li>
+        <li><strong>เพิ่ม Attribute:</strong> POST <code>/attributes/add/{event_id}</code> หรือส่งพร้อมเหตุการณ์ (Attribute array)</li>
+        <li><strong>เพิ่ม Object พร้อมสมาชิก:</strong> POST <code>/objects/add/{event_id}</code> แล้วระบุ Attribute ย่อยและ <code>object_reference</code> ใน payload</li>
+        <li><strong>ติดแท็ก:</strong> ใช้ <code>/events/addTag</code> หรือ <code>/attributes/addTag</code> เพื่อผูกแท็กที่มีอยู่ในตาราง <code>tags</code></li>
+        <li><strong>บันทึก Sightings:</strong> POST <code>/sightings/add/{attribute_id}</code> เพื่อบันทึกพบเห็น Indicator</li>
+        <li><strong>ดึงข้อมูล:</strong> GET <code>/events/restSearch</code> หรือ <code>/attributes/restSearch</code> พร้อมตัวกรองแท็ก, org, วันเวลา</li>
+      </ul>
+    </div>
+
+    <details open>
+      <summary>Visualization: API ↔ DB Mapping</summary>
+      <div class="mermaid">
+        flowchart LR
+          subgraph Client[โปรแกรม/สคริปต์]
+            C1[เรียก /events POST] -->|payload: info, distribution| DB1[(events)]
+            C2[เรียก /attributes/add] -->|payload: value, type, event_id| DB2[(attributes)]
+            C3[เรียก /objects/add] -->|payload: template_uuid, event_id| DB3[(misp_objects)]
+            C4[เรียก /events/addTag] -->|payload: tag_id, event_id| DB4[(event_tags)]
+            C5[เรียก /sightings/add] -->|payload: attribute_id| DB5[(sightings)]
+            C6[เรียก /events/restSearch] -->|filters| DB1
+          end
+          DB1 -->|event_id| DB2
+          DB1 -->|event_id| DB3
+          DB3 -->|object_id| DB2
+          DB2 -->|attribute_id| DB5
+          DB1 -->|event_id| DB4
+      </div>
+    </details>
+
+    <div class="two-col">
+      <div class="card">
+        <h3>จุดเหมือนกันระหว่าง DB ตรง vs API</h3>
+        <ul>
+          <li>ใช้ตารางและคีย์เดียวกัน (<code>event_id</code>, <code>attribute_id</code>, <code>object_id</code>)</li>
+          <li>ขอบเขตการแชร์พึ่งพา <code>distribution</code> และ <code>sharing_group_id</code> เท่ากัน</li>
+          <li>แท็กและ Galaxy ใช้ชุดตารางเดิม เพียงแต่ API จะสร้าง row ให้โดยอัตโนมัติ</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>จุดต่างหลัก</h3>
+        <ul>
+          <li>API ทำ Validation/Permission ให้ (ลดความเสี่ยงผิด referential integrity)</li>
+          <li>การแก้ DB ตรงต้องระวัง trigger/soft-delete และ timestamp ให้สอดคล้อง</li>
+          <li>API มักเขียน Audit Log/Version ให้ แต่ DB ตรงอาจต้องเติมเอง</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>4) เคล็ดลับทดลอง (ลองลบ/ดึง/แก้)</h2>
+    <ul>
+      <li><strong>Sandbox ก่อน:</strong> ใช้ DB สำรองหรือ transaction block เพื่อทดสอบ insert/update/delete</li>
+      <li><strong>Soft-delete:</strong> ตั้ง flag <code>deleted</code> ใน <code>attributes</code> แทนการลบทิ้งทันที เพื่อย้อนคืนได้</li>
+      <li><strong>ตรวจความสอดคล้อง:</strong> หลังลบ Attribute ควรลบหรืออัปเดต <code>object_references</code>, <code>attribute_tags</code>, <code>sightings</code> ที่เกี่ยวข้อง</li>
+      <li><strong>Sync/API Cache:</strong> ถ้าแก้ DB ตรงให้บังคับ re-sync หรือ refresh cache ของบริการ/ปลายทาง</li>
+      <li><strong>สำรวจเส้นทาง:</strong> ใช้แผนภาพด้านบนเพื่อเช็กว่าการแก้ไขแตะตารางใดบ้างก่อนรันจริง</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>สามารถคัดลอกบล็อก Mermaid จากหน้านี้ไปปรับแต่งใน <a href="https://mermaid.live/edit">mermaid.live</a> เพื่อดูเส้นทางแบบโต้ตอบ, ย้ายโหนด, หรือ export เป็นภาพ</p>
+  </footer>
+</body>
+</html>
