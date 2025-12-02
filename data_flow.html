@@ -2,177 +2,305 @@
 <html lang="th">
 <head>
   <meta charset="utf-8" />
-  <title>MISP Data Flow Visual Guide (DB vs API)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
-  <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({ startOnLoad: true, theme: "neutral" });
-  </script>
+  <title>Interactive Database Architecture Visualizer - MISP</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-M9qdzsi0Yp+R6BPQ4wY20N6l04e6MN2eUVx/FuSkFQ9gvP1ajpRBzE8povGAywvx4D9XK26Lznl0jZlHZ+Dn7A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <style>
-    :root { color-scheme: light dark; }
-    body { font-family: "Inter", "Noto Sans Thai", system-ui, -apple-system, sans-serif; line-height: 1.6; margin: 0 auto; max-width: 1100px; padding: 32px 24px; }
-    h1, h2, h3 { margin-top: 28px; }
-    .card { border: 1px solid #ccc; border-radius: 12px; padding: 18px 20px; margin: 22px 0; background: rgba(255,255,255,0.8); }
-    .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
-    code { background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 6px; }
-    details { border: 1px solid #ddd; border-radius: 10px; padding: 14px 16px; margin: 16px 0; background: rgba(0,0,0,0.03); }
-    details summary { cursor: pointer; font-weight: 600; }
-    .note { color: #b34700; font-weight: 600; }
+    body { font-family: "Inter", "Noto Sans Thai", system-ui, -apple-system, sans-serif; }
+    .viz-area { min-height: 540px; }
+    .node { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .node:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+    .ball { position: absolute; width: 14px; height: 14px; border-radius: 9999px; z-index: 30; pointer-events: none; }
+    .link-line { stroke-width: 3; opacity: 0.5; }
+    .table-card li.new-row { animation: highlight 1.6s ease; }
+    @keyframes highlight { 0% { background: rgba(59,130,246,0.15);} 80% { background: rgba(52,211,153,0.15);} 100% { background: transparent;} }
   </style>
 </head>
-<body>
-  <header>
-    <h1>คู่มือภาพรวมการไหลข้อมูล MISP: เข้าถึง DB ตรง vs เขียนโปรแกรมผ่าน API</h1>
-    <p>
-      หน้านี้ช่วยให้เห็นภาพฐานข้อมูล MISP และเส้นทางการใช้งาน 2 กรณีหลัก:
-      <strong>การแก้/เพิ่มข้อมูลตรงในฐานข้อมูล</strong> และ <strong>การดึง/ส่งข้อมูลผ่านโปรแกรม (API)</strong> โดยอ้างอิงจาก ER Diagram หลักในโครงการเดิม
-      และเพิ่มแผนภาพลำดับการ Query/Flow ให้ลองนำไปปรับใช้หรือทดลองลบ-ดึงข้อมูลได้อย่างเข้าใจโครงสร้าง
-    </p>
-  </header>
+<body class="bg-slate-50 text-slate-900">
+  <div class="max-w-7xl mx-auto p-6 space-y-6">
+    <header class="flex items-start justify-between gap-4">
+      <div>
+        <p class="text-sm font-semibold text-indigo-600 uppercase tracking-wide">Interactive Database Architecture Visualizer</p>
+        <h1 class="text-3xl font-bold text-slate-900">MISP: App Flow vs Direct SQL</h1>
+        <p class="text-slate-600 mt-2">แดชบอร์ดสอนภาพรวม Data Flow ตั้งแต่ User → Application Logic → Database พร้อมเปรียบเทียบการใช้งานผ่านแอปปกติ กับการยิง SQL ตรง</p>
+      </div>
+      <div class="text-right text-slate-600 text-sm hidden md:block">
+        <p><i class="fa-solid fa-bolt text-amber-500 mr-2"></i>Animation &amp; Live Table Update</p>
+        <p><i class="fa-solid fa-database text-emerald-500 mr-2"></i>Schema snapshot: events, attributes, tags, galaxies, correlations, shadow_attributes, users, organisations, event_tags</p>
+      </div>
+    </header>
 
-  <section class="card">
-    <h2>1) ภาพรวมโครงสร้าง (ER Snapshot)</h2>
-    <p>แผนภาพย่อด้านล่างเน้นตารางหลักที่ต้องแตะบ่อยเมื่อเพิ่ม/อ่านข้อมูลทั้งสองกรณี</p>
-    <div class="mermaid">
-      erDiagram
-        ORGANISATIONS ||--o{ USERS : owns
-        USERS ||--o{ EVENTS : creates
-        EVENTS ||--o{ ATTRIBUTES : contains
-        EVENTS ||--o{ MISP_OBJECTS : groups
-        MISP_OBJECTS ||--o{ ATTRIBUTES : composed_of
-        ATTRIBUTES ||--o{ SIGHTINGS : observed_in
-        EVENTS ||--o{ EVENT_REPORTS : documents
-        TAGS ||--o{ EVENT_TAGS : labels
-        TAGS ||--o{ ATTRIBUTE_TAGS : labels
-        EVENTS ||--o{ EVENT_TAGS : tagged_with
-        ATTRIBUTES ||--o{ ATTRIBUTE_TAGS : tagged_with
-        SHARING_GROUPS ||--o{ EVENTS : scope
-        SHARING_GROUPS ||--o{ SHARING_GROUP_ORG : members
-        ORGANISATIONS ||--o{ SHARING_GROUP_ORG : participates
+    <div class="grid grid-cols-1 lg:grid-cols-[360px,1fr] gap-5 items-start">
+      <!-- Control Panel -->
+      <section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 space-y-4">
+        <div class="flex items-center gap-2">
+          <span class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-indigo-600"><i class="fa-solid fa-gear"></i></span>
+          <div>
+            <h2 class="text-lg font-semibold">Control Panel</h2>
+            <p class="text-slate-500 text-sm">เลือกสถานการณ์เพื่อดูเส้นทางข้อมูล</p>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <button data-scenario="app-event" class="scenario w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+            <i class="fa-solid fa-circle-play"></i> App Flow: User สร้าง Event + Attribute
+          </button>
+          <button data-scenario="app-tag" class="scenario w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100">
+            <i class="fa-solid fa-tags"></i> App Flow: เพิ่ม Tag และผูก Event
+          </button>
+          <button data-scenario="direct-sql" class="scenario w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100">
+            <i class="fa-solid fa-terminal"></i> Direct SQL: Admin ยิง insert Attribute ตรง
+          </button>
+          <button data-scenario="direct-shadow" class="scenario w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100">
+            <i class="fa-solid fa-user-secret"></i> Direct SQL: Admin เพิ่ม shadow_attributes (Proposal)
+          </button>
+        </div>
+
+        <div class="bg-slate-900 text-slate-50 rounded-xl p-3 h-48 overflow-y-auto text-sm" id="logBox">
+          <div class="text-slate-300">Log: พร้อมให้เริ่มจำลองเส้นทางข้อมูล</div>
+        </div>
+        <p class="text-xs text-slate-500">สีฟ้า = ผ่าน App Logic | สีแดง = SQL ตรง | ตารางจะเพิ่มแถวใหม่เมื่อข้อมูลถึง DB</p>
+      </section>
+
+      <!-- Visualization -->
+      <section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 viz-area relative overflow-hidden">
+        <div class="absolute inset-0" aria-hidden="true">
+          <svg id="linkLayer" class="w-full h-full" viewBox="0 0 1200 620"></svg>
+        </div>
+        <div id="ballLayer" class="absolute inset-0"></div>
+
+        <div class="relative grid grid-rows-[120px,140px,1fr] h-full">
+          <!-- Layer 1 -->
+          <div class="grid grid-cols-2 gap-6 place-items-start">
+            <div id="node-user" class="node bg-indigo-50 border border-indigo-200 rounded-xl p-4 w-52">
+              <p class="text-xs text-indigo-500">Layer 1 · Actor</p>
+              <p class="text-lg font-semibold flex items-center gap-2"><i class="fa-solid fa-user"></i>User</p>
+              <p class="text-slate-600 text-sm">สร้าง Event/Attribute ผ่าน UI</p>
+            </div>
+            <div id="node-admin" class="node bg-rose-50 border border-rose-200 rounded-xl p-4 w-52">
+              <p class="text-xs text-rose-500">Layer 1 · Actor</p>
+              <p class="text-lg font-semibold flex items-center gap-2"><i class="fa-solid fa-shield-halved"></i>Admin / DBA</p>
+              <p class="text-slate-600 text-sm">เข้าถึง DB ตรง ใช้ SQL</p>
+            </div>
+          </div>
+
+          <!-- Layer 2 -->
+          <div class="grid grid-cols-1 place-items-center">
+            <div id="node-app" class="node bg-sky-50 border border-sky-200 rounded-2xl p-5 w-80 shadow-sm">
+              <p class="text-xs text-sky-500">Layer 2 · Application Logic</p>
+              <p class="text-lg font-semibold flex items-center gap-2"><i class="fa-solid fa-globe"></i>Web App / Middleware</p>
+              <ul class="text-sm text-slate-600 list-disc pl-4 mt-1 space-y-1">
+                <li>ทำ Validation &amp; Permission</li>
+                <li>บันทึก Audit / Soft-delete</li>
+                <li>จัดการ Workflow &amp; Queue</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Layer 3 -->
+          <div class="relative">
+            <p class="text-xs text-slate-500 mb-2">Layer 3 · Database (MISP schema snapshot)</p>
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3" id="tableGrid"></div>
+          </div>
+        </div>
+      </section>
     </div>
-    <p class="note">โฟกัสกุญแจเชื่อมโยง: <code>event_id</code>, <code>object_id</code>, <code>attribute_id</code>, <code>org_id</code>, <code>sharing_group_id</code></p>
-  </section>
+  </div>
 
-  <section>
-    <h2>2) กรณีเพิ่ม/แก้ข้อมูลตรงในฐานข้อมูล</h2>
-    <div class="two-col">
-      <div class="card">
-        <h3>ลำดับการเพิ่มข้อมูลหลัก</h3>
-        <ol>
-          <li>สร้างองค์กร/ผู้ใช้: เพิ่มแถวใน <code>organisations</code>, <code>users</code> (ตั้ง <code>organisation_id</code>, <code>role_id</code>)</li>
-          <li>สร้างเหตุการณ์: insert เข้า <code>events</code> กำหนด <code>uuid</code>, <code>distribution</code>, <code>sharing_group_id</code> (ถ้าใช้)</li>
-          <li>เพิ่ม Attribute: insert เข้า <code>attributes</code> โดยตั้ง <code>event_id</code> และ <code>object_id</code> ถ้ามาจาก Object</li>
-          <li>เพิ่ม Object (ถ้าต้องการโครงสร้าง): insert เข้า <code>misp_objects</code> ระบุ <code>template_uuid</code> แล้วเพิ่ม Attribute ย่อย + <code>object_references</code> เชื่อมกัน</li>
-          <li>ติดแท็ก/บริบท: ใส่ข้อมูลใน <code>tags</code> แล้วสร้างรายการเชื่อม เช่น <code>event_tags</code>, <code>attribute_tags</code></li>
-          <li>กำหนดการแชร์: ปรับค่า <code>distribution</code> หรือผูก <code>sharing_group_id</code>; ใช้ <code>sharing_group_org</code> เพื่อเพิ่มสมาชิก</li>
-        </ol>
-      </div>
-      <div class="card">
-        <h3>Query ที่แตะบ่อย (ตัวอย่าง)</h3>
-        <ul>
-          <li><strong>ดึงเหตุการณ์พร้อมแท็ก</strong>: join <code>events</code> ⇄ <code>event_tags</code> ⇄ <code>tags</code></li>
-          <li><strong>ดึง Attribute ทั้งหมดในเหตุการณ์</strong>: select จาก <code>attributes</code> ด้วย <code>event_id = ?</code></li>
-          <li><strong>ดู Object และความสัมพันธ์</strong>: join <code>misp_objects</code> ⇄ <code>object_references</code> ⇄ <code>attributes</code></li>
-          <li><strong>ตรวจขอบเขตการแชร์</strong>: อ่าน <code>events.distribution</code> และ <code>sharing_group_id</code>; ถ้ากลุ่ม แชร์ ให้ join <code>sharing_group_org</code></li>
-          <li><strong>ลบแบบปลอดภัย</strong>: พิจารณา soft-delete โดยตั้ง flag (เช่น <code>attributes.deleted = 1</code>) ก่อน hard-delete</li>
-        </ul>
-      </div>
-    </div>
+  <script>
+    const logBox = document.getElementById('logBox');
+    const linkLayer = document.getElementById('linkLayer');
+    const ballLayer = document.getElementById('ballLayer');
 
-    <details open>
-      <summary>Visualization: เส้นทาง Insert/Update ใน DB</summary>
-      <div class="mermaid">
-        flowchart TD
-          subgraph Setup[เตรียมความพร้อม]
-            A1[ORG/USER พร้อมสิทธิ์] --> A2[เลือก sharing_group]
-          end
-          subgraph EventFlow[เพิ่มเหตุการณ์]
-            E1[INSERT events] --> E2[INSERT misp_objects]
-            E1 --> E3[INSERT attributes]
-            E2 --> E4[INSERT object_references]
-            E2 --> E5[INSERT attributes (object members)]
-            E3 --> E6[INSERT sightings (ถ้ามี)]
-          end
-          subgraph Context[บริบท]
-            T1[INSERT tags] --> T2[INSERT event_tags]
-            T1 --> T3[INSERT attribute_tags]
-          end
-          A2 --> E1
-          E1 --> T2
-          E3 --> T3
-      </div>
-    </details>
-  </section>
+    const nodes = {
+      user: document.getElementById('node-user'),
+      admin: document.getElementById('node-admin'),
+      app: document.getElementById('node-app'),
+    };
 
-  <section>
-    <h2>3) กรณีเขียนโปรแกรมดึง/ส่งผ่าน API (แอปหรือสคริปต์)</h2>
-    <p>เส้นทางนี้ใช้ REST API ของ MISP (เช่น <code>/events</code>, <code>/attributes</code>, <code>/sightings</code>) หรือ Python/PHP clients ที่เรียก API เดียวกัน</p>
-    <div class="card">
-      <h3>แนวทางใช้งานทั่วไป</h3>
-      <ul>
-        <li><strong>สร้าง/อัปเดตเหตุการณ์:</strong> POST/PUT ไปที่ <code>/events</code>, กำหนด <code>distribution</code>, <code>sharing_group_id</code> เหมือนใน DB</li>
-        <li><strong>เพิ่ม Attribute:</strong> POST <code>/attributes/add/{event_id}</code> หรือส่งพร้อมเหตุการณ์ (Attribute array)</li>
-        <li><strong>เพิ่ม Object พร้อมสมาชิก:</strong> POST <code>/objects/add/{event_id}</code> แล้วระบุ Attribute ย่อยและ <code>object_reference</code> ใน payload</li>
-        <li><strong>ติดแท็ก:</strong> ใช้ <code>/events/addTag</code> หรือ <code>/attributes/addTag</code> เพื่อผูกแท็กที่มีอยู่ในตาราง <code>tags</code></li>
-        <li><strong>บันทึก Sightings:</strong> POST <code>/sightings/add/{attribute_id}</code> เพื่อบันทึกพบเห็น Indicator</li>
-        <li><strong>ดึงข้อมูล:</strong> GET <code>/events/restSearch</code> หรือ <code>/attributes/restSearch</code> พร้อมตัวกรองแท็ก, org, วันเวลา</li>
-      </ul>
-    </div>
+    const tables = {
+      events: { title: 'events', color: 'border-indigo-200 bg-indigo-50', rows: ["event_id=101, org_id=1, info='Malware A'"] },
+      attributes: { title: 'attributes', color: 'border-sky-200 bg-sky-50', rows: ["attribute_id=501, event_id=101, type=ip-dst"] },
+      tags: { title: 'tags', color: 'border-amber-200 bg-amber-50', rows: ["tag_id=10, name='tlp:amber'" ] },
+      event_tags: { title: 'event_tags', color: 'border-amber-200 bg-amber-50', rows: ["event_id=101, tag_id=10"] },
+      galaxies: { title: 'galaxies', color: 'border-purple-200 bg-purple-50', rows: ["galaxy_id=1, name='ThreatActor'" ] },
+      correlations: { title: 'correlations', color: 'border-emerald-200 bg-emerald-50', rows: ["event_id=101 ⇄ event_id=88" ] },
+      shadow_attributes: { title: 'shadow_attributes', color: 'border-amber-200 bg-amber-50', rows: ["proposal_id=9001, event_id=101" ] },
+      users: { title: 'users', color: 'border-slate-200 bg-slate-50', rows: ["user_id=1, role=admin" ] },
+      organisations: { title: 'organisations', color: 'border-slate-200 bg-slate-50', rows: ["org_id=1, name='ACME CERT'" ] }
+    };
 
-    <details open>
-      <summary>Visualization: API ↔ DB Mapping</summary>
-      <div class="mermaid">
-        flowchart LR
-          subgraph Client[โปรแกรม/สคริปต์]
-            C1[เรียก /events POST] -->|payload: info, distribution| DB1[(events)]
-            C2[เรียก /attributes/add] -->|payload: value, type, event_id| DB2[(attributes)]
-            C3[เรียก /objects/add] -->|payload: template_uuid, event_id| DB3[(misp_objects)]
-            C4[เรียก /events/addTag] -->|payload: tag_id, event_id| DB4[(event_tags)]
-            C5[เรียก /sightings/add] -->|payload: attribute_id| DB5[(sightings)]
-            C6[เรียก /events/restSearch] -->|filters| DB1
-          end
-          DB1 -->|event_id| DB2
-          DB1 -->|event_id| DB3
-          DB3 -->|object_id| DB2
-          DB2 -->|attribute_id| DB5
-          DB1 -->|event_id| DB4
-      </div>
-    </details>
+    const tableGrid = document.getElementById('tableGrid');
+    function renderTables() {
+      tableGrid.innerHTML = '';
+      Object.values(tables).forEach((tbl) => {
+        const card = document.createElement('div');
+        card.className = `table-card border rounded-xl p-3 shadow-sm ${tbl.color}`;
+        card.innerHTML = `
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-semibold text-slate-800"><i class="fa-solid fa-database mr-2 text-slate-500"></i>${tbl.title}</div>
+            <span class="text-xs text-slate-500">${tbl.rows.length} rows</span>
+          </div>
+          <ul class="space-y-1 text-sm text-slate-700"></ul>
+        `;
+        const ul = card.querySelector('ul');
+        tbl.rows.forEach((row) => {
+          const li = document.createElement('li');
+          li.textContent = row;
+          ul.appendChild(li);
+        });
+        tableGrid.appendChild(card);
+      });
+    }
+    renderTables();
 
-    <div class="two-col">
-      <div class="card">
-        <h3>จุดเหมือนกันระหว่าง DB ตรง vs API</h3>
-        <ul>
-          <li>ใช้ตารางและคีย์เดียวกัน (<code>event_id</code>, <code>attribute_id</code>, <code>object_id</code>)</li>
-          <li>ขอบเขตการแชร์พึ่งพา <code>distribution</code> และ <code>sharing_group_id</code> เท่ากัน</li>
-          <li>แท็กและ Galaxy ใช้ชุดตารางเดิม เพียงแต่ API จะสร้าง row ให้โดยอัตโนมัติ</li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3>จุดต่างหลัก</h3>
-        <ul>
-          <li>API ทำ Validation/Permission ให้ (ลดความเสี่ยงผิด referential integrity)</li>
-          <li>การแก้ DB ตรงต้องระวัง trigger/soft-delete และ timestamp ให้สอดคล้อง</li>
-          <li>API มักเขียน Audit Log/Version ให้ แต่ DB ตรงอาจต้องเติมเอง</li>
-        </ul>
-      </div>
-    </div>
-  </section>
+    function appendLog(message) {
+      const div = document.createElement('div');
+      div.textContent = message;
+      logBox.appendChild(div);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
 
-  <section class="card">
-    <h2>4) เคล็ดลับทดลอง (ลองลบ/ดึง/แก้)</h2>
-    <ul>
-      <li><strong>Sandbox ก่อน:</strong> ใช้ DB สำรองหรือ transaction block เพื่อทดสอบ insert/update/delete</li>
-      <li><strong>Soft-delete:</strong> ตั้ง flag <code>deleted</code> ใน <code>attributes</code> แทนการลบทิ้งทันที เพื่อย้อนคืนได้</li>
-      <li><strong>ตรวจความสอดคล้อง:</strong> หลังลบ Attribute ควรลบหรืออัปเดต <code>object_references</code>, <code>attribute_tags</code>, <code>sightings</code> ที่เกี่ยวข้อง</li>
-      <li><strong>Sync/API Cache:</strong> ถ้าแก้ DB ตรงให้บังคับ re-sync หรือ refresh cache ของบริการ/ปลายทาง</li>
-      <li><strong>สำรวจเส้นทาง:</strong> ใช้แผนภาพด้านบนเพื่อเช็กว่าการแก้ไขแตะตารางใดบ้างก่อนรันจริง</li>
-    </ul>
-  </section>
+    function getCenter(el) {
+      const rect = el.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
 
-  <footer>
-    <p>สามารถคัดลอกบล็อก Mermaid จากหน้านี้ไปปรับแต่งใน <a href="https://mermaid.live/edit">mermaid.live</a> เพื่อดูเส้นทางแบบโต้ตอบ, ย้ายโหนด, หรือ export เป็นภาพ</p>
-  </footer>
+    function createLink(fromEl, toEl, color) {
+      const from = getCenter(fromEl);
+      const to = getCenter(toEl);
+      const svgRect = linkLayer.getBoundingClientRect();
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', from.x - svgRect.left);
+      line.setAttribute('y1', from.y - svgRect.top);
+      line.setAttribute('x2', to.x - svgRect.left);
+      line.setAttribute('y2', to.y - svgRect.top);
+      line.setAttribute('stroke', color);
+      line.classList.add('link-line');
+      linkLayer.appendChild(line);
+      return line;
+    }
+
+    function animateBall(points, color, onFinish) {
+      const ball = document.createElement('div');
+      ball.className = 'ball';
+      ball.style.background = color;
+      ballLayer.appendChild(ball);
+
+      const keyframes = points.map((p) => ({ transform: `translate(${p.x - 7}px, ${p.y - 7}px)` }));
+      const anim = ball.animate(keyframes, { duration: 1400, easing: 'ease-in-out' });
+      anim.onfinish = () => { ball.remove(); onFinish && onFinish(); };
+    }
+
+    function highlightNewRow(tableName, text) {
+      const card = [...tableGrid.children].find((el) => el.querySelector('.font-semibold').textContent.trim() === tableName);
+      if (!card) return;
+      const ul = card.querySelector('ul');
+      const li = document.createElement('li');
+      li.textContent = text;
+      li.classList.add('new-row');
+      ul.appendChild(li);
+      const count = card.querySelector('span');
+      const tbl = tables[tableName];
+      if (tbl) tbl.rows.push(text);
+      count.textContent = `${ul.children.length} rows`;
+    }
+
+    function scenarioAppEvent() {
+      appendLog('User ส่งคำขอสร้าง Event + Attribute ผ่าน App');
+      const path = [getCenter(nodes.user), getCenter(nodes.app), anchorTable('events')];
+      createLink(nodes.user, nodes.app, '#38bdf8');
+      createLink(nodes.app, findTableCard('events'), '#38bdf8');
+      animateBall(path, '#0ea5e9', () => {
+        highlightNewRow('events', `event_id=${Math.floor(Math.random()*900+200)}, org_id=1, info='New Event'`);
+        appendLog('App บันทึก events และ sync audit');
+        const attrPath = [getCenter(nodes.app), anchorTable('attributes')];
+        createLink(nodes.app, findTableCard('attributes'), '#38bdf8');
+        animateBall(attrPath, '#0ea5e9', () => {
+          highlightNewRow('attributes', `attribute_id=${Math.floor(Math.random()*900+600)}, event_id=ล่าสุด, type=domain`);
+          appendLog('Attribute ถูกเพิ่มพร้อม event_id ล่าสุด');
+        });
+      });
+    }
+
+    function scenarioAppTag() {
+      appendLog('User เพิ่ม Tag และผูกกับ Event ผ่าน App');
+      const path = [getCenter(nodes.user), getCenter(nodes.app), anchorTable('tags')];
+      createLink(nodes.user, nodes.app, '#38bdf8');
+      createLink(nodes.app, findTableCard('tags'), '#38bdf8');
+      animateBall(path, '#0ea5e9', () => {
+        const tagName = `tlp:${['green','amber','red'][Math.floor(Math.random()*3)]}`;
+        highlightNewRow('tags', `tag_id=${Math.floor(Math.random()*100+20)}, name='${tagName}'`);
+        appendLog('App สร้าง tag ใหม่ในตาราง tags');
+        const tagMapPath = [getCenter(nodes.app), anchorTable('event_tags')];
+        createLink(nodes.app, findTableCard('event_tags'), '#38bdf8');
+        animateBall(tagMapPath, '#0ea5e9', () => {
+          highlightNewRow('event_tags', `event_id=101, tag='${tagName}'`);
+          appendLog('Event ถูกผูกแท็กสำเร็จ');
+        });
+      });
+    }
+
+    function scenarioDirectSQL() {
+      appendLog('Admin ยิง SQL insert attributes โดยตรง (ข้าม App)');
+      const path = [getCenter(nodes.admin), anchorTable('attributes')];
+      createLink(nodes.admin, findTableCard('attributes'), '#ef4444');
+      animateBall(path, '#ef4444', () => {
+        highlightNewRow('attributes', `attribute_id=${Math.floor(Math.random()*900+800)}, event_id=101, type=url`);
+        appendLog('SQL ดำเนินการสำเร็จ: ไม่มี validation จาก App');
+      });
+    }
+
+    function scenarioDirectShadow() {
+      appendLog('Admin เพิ่ม shadow_attributes (Proposal) ผ่าน SQL ตรง');
+      const path = [getCenter(nodes.admin), anchorTable('shadow_attributes')];
+      createLink(nodes.admin, findTableCard('shadow_attributes'), '#f59e0b');
+      animateBall(path, '#f59e0b', () => {
+        highlightNewRow('shadow_attributes', `proposal_id=${Math.floor(Math.random()*9000+1000)}, event_id=101, status=pending`);
+        appendLog('Proposal ถูกเพิ่ม (ต้องรีวิวใน App)');
+      });
+    }
+
+    function findTableCard(name) {
+      return [...tableGrid.children].find((el) => el.querySelector('.font-semibold').textContent.trim() === name);
+    }
+
+    function anchorTable(name) {
+      const card = findTableCard(name);
+      const rect = card.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+
+    // Pre-draw static helper lines (faint)
+    function drawStaticLines() {
+      linkLayer.innerHTML = '';
+      createLink(nodes.user, nodes.app, '#cbd5e1');
+      createLink(nodes.admin, findTableCard('attributes'), '#cbd5e1');
+      createLink(nodes.app, findTableCard('events'), '#cbd5e1');
+      createLink(nodes.app, findTableCard('event_tags'), '#cbd5e1');
+      createLink(findTableCard('events'), findTableCard('attributes'), '#cbd5e1');
+      createLink(findTableCard('attributes'), findTableCard('correlations'), '#cbd5e1');
+      createLink(findTableCard('events'), findTableCard('correlations'), '#cbd5e1');
+      createLink(findTableCard('events'), findTableCard('galaxies'), '#cbd5e1');
+      createLink(findTableCard('tags'), findTableCard('event_tags'), '#cbd5e1');
+      createLink(findTableCard('users'), findTableCard('organisations'), '#cbd5e1');
+    }
+    window.addEventListener('resize', drawStaticLines);
+
+    // Bind buttons
+    document.querySelectorAll('.scenario').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const type = btn.dataset.scenario;
+        if (type === 'app-event') scenarioAppEvent();
+        if (type === 'app-tag') scenarioAppTag();
+        if (type === 'direct-sql') scenarioDirectSQL();
+        if (type === 'direct-shadow') scenarioDirectShadow();
+      });
+    });
+
+    // initial draw
+    requestAnimationFrame(drawStaticLines);
+  </script>
 </body>
 </html>
