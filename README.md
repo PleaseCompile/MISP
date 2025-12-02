@@ -8,7 +8,8 @@
 
 ## หมวดหมู่ข้อมูลหลัก (Key Domains)
 - **แกนเหตุการณ์ (Events & Attributes):**
-  - `EVENTS` เก็บเหตุการณ์หลัก มี `info`, `uuid`, ระดับการเปิดเผย `distribution`, วันที่ `date`, เจ้าของ `org_id`, ผู้สร้าง `creator_user_id`, และขอบเขตการแชร์ `sharing_group_id`.
+  - `EVENTS` เก็บเหตุการณ์หลัก มี `info`, `uuid`, ระดับการเปิดเผย `distribution`, วันที่ `date`, เจ้าของ `org_id`, ผู้สร้าง `creator_user_id`,
+ และขอบเขตการแชร์ `sharing_group_id`.
   - `ATTRIBUTES` เก็บ Indicator รายการย่อยที่อยู่ในเหตุการณ์ เช่น IP, Domain, Hash โดยอ้างอิงกลับไปที่ `event_id` และวัตถุ `object_id` ถ้ามาจาก Object
   - `EVENT_REPORTS` เอกสารสรุปเหตุการณ์ที่เชื่อมกับ `event_id` และผู้เขียน `user_id`
   - `SIGHTINGS` บันทึกการพบเห็น Indicator เชื่อมกับ `attribute_id`, `event_id`, องค์กร (`org_id`) และผู้รายงาน (`user_id`)
@@ -50,5 +51,11 @@
 - ไล่เส้นเชื่อมจาก `EVENTS` ออกไปหาตารางรอบข้าง เพื่อเห็นภาพรวมก่อนลงลึกรายละเอียด
 - สังเกตฟิลด์เชื่อมหลัก: `uuid`, `org_id`, `event_id`, `sharing_group_id` และ `distribution` มักเป็นเส้นทางหลักของข้อมูล
 - ใน mermaid.live สามารถเลือก Node เพื่อ highlight ความสัมพันธ์ หรือปรับตำแหน่งเพื่อลดเส้นไขว้
+
+## วิธีเคลียร์ Conflict ใน PR นี้อย่างรวดเร็ว
+หาก GitHub แจ้งว่า PR มี conflict กับสาขาหลัก ให้ดูขั้นตอนตัวอย่างในไฟล์ [`CONFLICT_RESOLUTION.md`](./CONFLICT_RESOLUTION.md):
+- ดึงฐานล่าสุด (`git fetch`) แล้วใช้ `git rebase origin/main` หรือ `git merge origin/main` เพื่อรวมการเปลี่ยนแปลง
+- แก้ marker `<<<<<<<` ในไฟล์ที่ชนกัน (`ER_diagram.md`, `README.md`, `data_flow.html`) และตรวจสอบด้วย `git diff --check`
+- commit แล้ว push ขึ้นสาขางาน จากนั้นกด **Resolve conflicts** ใน GitHub เพื่อยืนยันผลลัพธ์
 
 หากต้องการแก้ไขหรือขยาย ER Diagram สามารถปรับโค้ดใน `ER_diagram.md` แล้วเรนเดอร์ใหม่บน mermaid.live เพื่อทดสอบความเชื่อมโยงทันที
